@@ -274,7 +274,7 @@ setup_telemetry(
 ## 📚 Documentation
 
 - **Quick Start Guide**: This file
-- **Main README**: See `../README.md` for architecture overview
+- **Main README**: See [README.md](../README.md) for architecture overview
 - **Agent Framework Docs**: [Microsoft Learn](https://learn.microsoft.com/agent-framework/)
 
 ## 🆘 Getting Help
