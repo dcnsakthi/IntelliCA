@@ -245,7 +245,7 @@ def main():
     st.markdown("## 🏠 Welcome to the Customer Analytics Platform")
     
     st.markdown("""
-    This platform demonstrates the integration of **AI and multi-database technologies** 
+    This platform demonstrates the integration of **AI and Microsoft Fabric database technologies (Fabric SQL & Fabric Cosmos)** 
     to provide intelligent customer analytics, product recommendations, and sentiment analysis.
     """)
     
