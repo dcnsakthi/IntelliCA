@@ -35,7 +35,7 @@ This solution simulates an enterprise customer analytics platform that:
 │                 │              │  (with Vector Search) │
 │ Customers       │              │                       │
 │ Orders          │              │ Products + Embeddings │
-│ Transactions    │              │ Reviews + Embeddings │
+│ Transactions    │              │ Reviews + Embeddings  │
 │                 │              │ User Sessions         │
 │                 │              │ Click Streams         │
 └─────────────────┘              └───────────────────────┘
