@@ -1,0 +1,36 @@
+# Core AI Framework - Microsoft Agent Framework
+agent-framework[all]  # Pre-release version with all sub-packages
+openai>=1.0.0
+
+# Azure Database Connectors
+pyodbc==5.2.0
+azure-cosmos==4.7.0
+azure-identity==1.19.0
+
+# Web Framework
+streamlit==1.39.0
+streamlit-aggrid==1.0.5
+
+# Data Processing
+pandas
+numpy
+scikit-learn==1.5.2
+
+# Visualization
+plotly==5.24.1
+matplotlib==3.9.2
+seaborn==0.13.2
+
+# Utilities
+python-dotenv==1.0.1
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Additional AI/ML
+langchain==0.3.7
+sentence-transformers==3.2.1
+
+# Development
+pytest==8.3.3
+black==24.10.0
+faker==30.8.2
