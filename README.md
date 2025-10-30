@@ -210,6 +210,14 @@ IntelliCAP/
 ├── docs/
 │   └── QUICKSTART.md              # Quick start guide
 │
+├── tests/
+│   ├── test_monitor_search.py     # Monitor search functionality tests
+│   ├── test_pandas_access.py      # Pandas data access tests
+│   ├── test_query_syntax.py       # Query syntax validation tests
+│   ├── test_recommendations.py    # Recommendation engine tests
+│   ├── test_semantic_search.py    # Semantic search tests
+│   └── test_vector_search.py      # Vector search tests
+│
 └── pages/
     ├── 1_Customer_Analytics.py    # Customer 360° view
     ├── 2_Product_Recommendations.py  # Semantic product search
