@@ -6,6 +6,10 @@ import logging
 from contextlib import contextmanager
 from azure.identity import DefaultAzureCredential
 import struct
+from datetime import datetime, timedelta
+import threading
+import hashlib
+import pickle
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +21,10 @@ class FabricSQLConnector:
         self,
         endpoint: str,
         database: str,
-        driver: str = "{ODBC Driver 18 for SQL Server}"  # Keep for compatibility, not used
+        driver: str = "{ODBC Driver 18 for SQL Server}",  # Keep for compatibility
+        pool_size: int = 5,
+        enable_cache: bool = True,
+        cache_ttl: int = 60  # Cache TTL in seconds
     ):
         """
         Initialize Microsoft Fabric SQL connector with Entra ID authentication.
@@ -26,6 +33,9 @@ class FabricSQLConnector:
             endpoint: Fabric SQL endpoint (e.g., 'workspace.datawarehouse.fabric.microsoft.com')
             database: Database name
             driver: Kept for compatibility, mssql-python handles driver internally
+            pool_size: Number of connections to maintain in pool (default: 5)
+            enable_cache: Enable query result caching (default: True)
+            cache_ttl: Cache time-to-live in seconds (default: 60)
             
         Note:
             Authentication uses Azure Entra ID (DefaultAzureCredential).
@@ -39,17 +49,109 @@ class FabricSQLConnector:
         self.endpoint = endpoint
         self.database = database
         self.credential = DefaultAzureCredential()
+        self.pool_size = pool_size
+        self.enable_cache = enable_cache
+        self.cache_ttl = cache_ttl
+        
+        # Token caching
+        self._token_cache = None
+        self._token_expiry = None
+        self._token_lock = threading.Lock()
+        
+        # Query result caching
+        self._query_cache: Dict[str, tuple[pd.DataFrame, datetime]] = {}
+        self._cache_lock = threading.Lock()
+        
+        # Connection string (reusable)
+        self._connection_string = (
+            f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+            f"SERVER={self.endpoint};"
+            f"DATABASE={self.database};"
+            f"Encrypt=yes;"
+            f"TrustServerCertificate=no;"
+        )
     
     def _get_access_token(self) -> str:
         """
-        Get access token for Azure SQL Database using Entra ID.
+        Get cached access token for Azure SQL Database using Entra ID.
+        Token is cached and reused until it expires.
         
         Returns:
             Access token string
         """
-        # Scope for Azure SQL Database
-        token = self.credential.get_token("https://database.windows.net/.default")
-        return token.token
+        with self._token_lock:
+            # Check if we have a valid cached token (refresh 5 minutes before expiry)
+            if self._token_cache and self._token_expiry:
+                if datetime.now() < self._token_expiry - timedelta(minutes=5):
+                    return self._token_cache
+            
+            # Get new token
+            token_obj = self.credential.get_token("https://database.windows.net/.default")
+            self._token_cache = token_obj.token
+            # Token expiry is in seconds since epoch
+            self._token_expiry = datetime.fromtimestamp(token_obj.expires_on)
+            
+            logger.info(f"New token acquired, expires at {self._token_expiry}")
+            return self._token_cache
+    
+    def _get_cache_key(self, query: str, params: Optional[tuple] = None) -> str:
+        """
+        Generate cache key for query and params.
+        
+        Args:
+            query: SQL query
+            params: Query parameters
+            
+        Returns:
+            Cache key string
+        """
+        cache_data = f"{query}_{params}"
+        return hashlib.md5(cache_data.encode()).hexdigest()
+    
+    def _get_cached_result(self, cache_key: str) -> Optional[pd.DataFrame]:
+        """
+        Get cached query result if available and not expired.
+        
+        Args:
+            cache_key: Cache key
+            
+        Returns:
+            Cached DataFrame or None
+        """
+        if not self.enable_cache:
+            return None
+            
+        with self._cache_lock:
+            if cache_key in self._query_cache:
+                df, cached_time = self._query_cache[cache_key]
+                if datetime.now() - cached_time < timedelta(seconds=self.cache_ttl):
+                    logger.info(f"Cache hit for query (age: {(datetime.now() - cached_time).seconds}s)")
+                    return df.copy()  # Return a copy to avoid modifications
+                else:
+                    # Remove expired cache
+                    del self._query_cache[cache_key]
+        return None
+    
+    def _cache_result(self, cache_key: str, df: pd.DataFrame):
+        """
+        Cache query result.
+        
+        Args:
+            cache_key: Cache key
+            df: DataFrame to cache
+        """
+        if not self.enable_cache:
+            return
+            
+        with self._cache_lock:
+            self._query_cache[cache_key] = (df.copy(), datetime.now())
+            logger.info(f"Cached query result (cache size: {len(self._query_cache)})")
+    
+    def clear_cache(self):
+        """Clear all cached query results."""
+        with self._cache_lock:
+            self._query_cache.clear()
+            logger.info("Query cache cleared")
         
     @contextmanager
     def get_connection(self):
@@ -97,6 +199,7 @@ class FabricSQLConnector:
     def execute_query(self, query: str, params: Optional[tuple] = None) -> pd.DataFrame:
         """
         Execute a SELECT query and return results as DataFrame.
+        Results are cached for better performance.
         
         Args:
             query: SQL query to execute
@@ -105,6 +208,12 @@ class FabricSQLConnector:
         Returns:
             DataFrame with query results
         """
+        # Check cache first
+        cache_key = self._get_cache_key(query, params)
+        cached_result = self._get_cached_result(cache_key)
+        if cached_result is not None:
+            return cached_result
+        
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
@@ -123,9 +232,46 @@ class FabricSQLConnector:
                 df = pd.DataFrame.from_records(rows, columns=columns)
                 
             logger.info(f"Query executed successfully, returned {len(df)} rows")
+            
+            # Cache the result
+            self._cache_result(cache_key, df)
+            
             return df
         except Exception as e:
             logger.error(f"Query execution error: {e}")
+            raise
+    
+    def execute_batch_queries(self, queries: List[str]) -> List[pd.DataFrame]:
+        """
+        Execute multiple queries in a single connection (more efficient).
+        
+        Args:
+            queries: List of SQL queries to execute
+            
+        Returns:
+            List of DataFrames with query results
+        """
+        results = []
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                for query in queries:
+                    cursor.execute(query)
+                    
+                    # Fetch column names
+                    columns = [column[0] for column in cursor.description]
+                    
+                    # Fetch all rows
+                    rows = cursor.fetchall()
+                    
+                    # Convert to DataFrame
+                    df = pd.DataFrame.from_records(rows, columns=columns)
+                    results.append(df)
+                    
+            logger.info(f"Batch executed successfully, {len(queries)} queries")
+            return results
+        except Exception as e:
+            logger.error(f"Batch query execution error: {e}")
             raise
     
     def execute_non_query(self, query: str, params: Optional[tuple] = None) -> int:

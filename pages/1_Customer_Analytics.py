@@ -60,49 +60,55 @@ def main():
         st.subheader("📊 Customer Overview")
         
         try:
-            # Get statistics
-            total_customers = sql_conn.execute_query(
-                "SELECT COUNT(*) as count FROM ca.Customers WHERE IsActive = 1"
-            )
-            
-            total_revenue = sql_conn.execute_query(
-                "SELECT SUM(TotalLifetimeValue) as total FROM ca.Customers WHERE IsActive = 1"
-            )
-            
-            avg_ltv = sql_conn.execute_query(
-                "SELECT AVG(TotalLifetimeValue) as avg FROM ca.Customers WHERE IsActive = 1"
-            )
-            
-            recent_orders = sql_conn.execute_query(
-                "SELECT COUNT(*) as count FROM ca.Orders WHERE OrderDate >= DATEADD(day, -30, GETDATE())"
-            )
+            # Get all statistics in a single optimized query
+            stats_query = """
+            SELECT 
+                (SELECT COUNT(*) FROM ca.Customers WHERE IsActive = 1) as total_customers,
+                (SELECT SUM(TotalLifetimeValue) FROM ca.Customers WHERE IsActive = 1) as total_revenue,
+                (SELECT AVG(TotalLifetimeValue) FROM ca.Customers WHERE IsActive = 1) as avg_ltv,
+                (SELECT COUNT(*) FROM ca.Orders WHERE OrderDate >= DATEADD(day, -30, GETDATE())) as recent_orders
+            """
+            stats_df = sql_conn.execute_query(stats_query)
             
             # Display metrics
             col1, col2, col3, col4 = st.columns(4)
             
-            with col1:
-                st.metric(
-                    "Total Customers",
-                    f"{int(total_customers.iloc[0]['count']):,}" if not total_customers.empty else "0"
-                )
-            
-            with col2:
-                st.metric(
-                    "Total Revenue",
-                    f"${float(total_revenue.iloc[0]['total']):,.2f}" if not total_revenue.empty and total_revenue.iloc[0]['total'] else "$0"
-                )
-            
-            with col3:
-                st.metric(
-                    "Avg Lifetime Value",
-                    f"${float(avg_ltv.iloc[0]['avg']):,.2f}" if not avg_ltv.empty and avg_ltv.iloc[0]['avg'] else "$0"
-                )
-            
-            with col4:
-                st.metric(
-                    "Orders (30 days)",
-                    f"{int(recent_orders.iloc[0]['count']):,}" if not recent_orders.empty else "0"
-                )
+            if not stats_df.empty:
+                row = stats_df.iloc[0]
+                
+                with col1:
+                    st.metric(
+                        "Total Customers",
+                        f"{int(row['total_customers']):,}" if row['total_customers'] else "0"
+                    )
+                
+                with col2:
+                    st.metric(
+                        "Total Revenue",
+                        f"${float(row['total_revenue']):,.2f}" if row['total_revenue'] else "$0"
+                    )
+                
+                with col3:
+                    st.metric(
+                        "Avg Lifetime Value",
+                        f"${float(row['avg_ltv']):,.2f}" if row['avg_ltv'] else "$0"
+                    )
+                
+                with col4:
+                    st.metric(
+                        "Orders (30 days)",
+                        f"{int(row['recent_orders']):,}" if row['recent_orders'] else "0"
+                    )
+            else:
+                # Show zeros if no data
+                with col1:
+                    st.metric("Total Customers", "0")
+                with col2:
+                    st.metric("Total Revenue", "$0")
+                with col3:
+                    st.metric("Avg Lifetime Value", "$0")
+                with col4:
+                    st.metric("Orders (30 days)", "0")
             
             st.markdown("---")
             
