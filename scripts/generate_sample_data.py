@@ -21,30 +21,133 @@ from src.agent_integration import get_embedding_service, generate_embeddings
 fake = Faker()
 
 
-def generate_customer_data(sql_conn, num_customers=100):
+def generate_customer_data(sql_conn, num_customers=100, bulk_insert=False):
     """Generate sample customer data."""
     print(f"Generating {num_customers} customers...")
     
     segments = ['Bronze', 'Silver', 'Gold', 'Premium']
     
-    for i in range(num_customers):
-        customer_data = {
-            'FirstName': fake.first_name(),
-            'LastName': fake.last_name(),
-            'Email': fake.email(),
-            'Phone': fake.phone_number()[:20],
-            'DateOfBirth': fake.date_of_birth(minimum_age=18, maximum_age=80),
-            'Country': fake.country()[:100],
-            'City': fake.city()[:100],
-            'CustomerSegment': random.choice(segments)
-        }
+    if bulk_insert:
+        # Generate all data first
+        customers = []
+        for i in range(num_customers):
+            customers.append((
+                fake.first_name(),
+                fake.last_name(),
+                fake.email(),
+                fake.phone_number()[:20],
+                fake.date_of_birth(minimum_age=18, maximum_age=80),
+                fake.country()[:100],
+                fake.city()[:100],
+                random.choice(segments)
+            ))
         
+        # Bulk insert
         try:
-            sql_conn.insert_customer(customer_data)
+            query = """
+            INSERT INTO ca.Customers 
+            (FirstName, LastName, Email, Phone, DateOfBirth, Country, City, CustomerSegment)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            with sql_conn.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.executemany(query, customers)
+                    conn.commit()
+            print(f"✓ Generated {num_customers} customers (bulk insert)")
         except Exception as e:
-            print(f"Error inserting customer {i+1}: {e}")
+            print(f"Error bulk inserting customers: {e}")
+    else:
+        # Row by row insert
+        for i in range(num_customers):
+            customer_data = {
+                'FirstName': fake.first_name(),
+                'LastName': fake.last_name(),
+                'Email': fake.email(),
+                'Phone': fake.phone_number()[:20],
+                'DateOfBirth': fake.date_of_birth(minimum_age=18, maximum_age=80),
+                'Country': fake.country()[:100],
+                'City': fake.city()[:100],
+                'CustomerSegment': random.choice(segments)
+            }
+            
+            try:
+                sql_conn.insert_customer(customer_data)
+            except Exception as e:
+                print(f"Error inserting customer {i+1}: {e}")
+        
+        print(f"✓ Generated {num_customers} customers")
+
+
+def generate_sql_product_data(sql_conn, num_products=20, bulk_insert=False):
+    """Generate sample product data for SQL Database."""
+    print(f"Generating {num_products} products...")
     
-    print(f"✓ Generated {num_customers} customers")
+    categories = {
+        'Electronics': ['Smartphones', 'Laptops', 'Tablets', 'Accessories'],
+        'Clothing': ['Men', 'Women', 'Kids', 'Accessories'],
+        'Home': ['Furniture', 'Decor', 'Kitchen', 'Bedding'],
+        'Sports': ['Fitness', 'Outdoor', 'Team Sports', 'Water Sports']
+    }
+    
+    if bulk_insert:
+        # Generate all data first
+        products = []
+        for i in range(num_products):
+            category = random.choice(list(categories.keys()))
+            subcategory = random.choice(categories[category])
+            products.append((
+                f"{subcategory} Item {i+1}",
+                f"SKU-{i+1:05d}",
+                category,
+                subcategory,
+                round(random.uniform(10.0, 500.0), 2),
+                random.randint(0, 200)
+            ))
+        
+        # Bulk insert
+        try:
+            query = """
+            INSERT INTO ca.Products (ProductName, SKU, Category, SubCategory, UnitPrice, StockQuantity)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """
+            with sql_conn.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.executemany(query, products)
+                    conn.commit()
+            print(f"✓ Generated {num_products} products (bulk insert)")
+        except Exception as e:
+            print(f"Error bulk inserting products: {e}")
+    else:
+        # Row by row insert
+        for i in range(num_products):
+            category = random.choice(list(categories.keys()))
+            subcategory = random.choice(categories[category])
+            
+            product_name = f"{subcategory} Item {i+1}"
+            sku = f"SKU-{i+1:05d}"
+            unit_price = round(random.uniform(10.0, 500.0), 2)
+            stock_quantity = random.randint(0, 200)
+            
+            try:
+                query = """
+                INSERT INTO ca.Products (ProductName, SKU, Category, SubCategory, UnitPrice, StockQuantity)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """
+                with sql_conn.get_connection() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(query, (
+                            product_name,
+                            sku,
+                            category,
+                            subcategory,
+                            unit_price,
+                            stock_quantity
+                        ))
+                        conn.commit()
+            except Exception as e:
+                print(f"Error inserting product {i+1}: {e}")
+        
+        print(f"✓ Generated {num_products} products")
 
 
 def generate_product_data(cosmos_conn, embedding_service, num_products=50):
@@ -109,7 +212,7 @@ def generate_product_data(cosmos_conn, embedding_service, num_products=50):
     print(f"✓ Generated {num_products} products with embeddings")
 
 
-def generate_order_data(sql_conn, num_orders=500):
+def generate_order_data(sql_conn, num_orders=500, bulk_insert=False):
     """Generate sample order data."""
     print(f"Generating {num_orders} orders...")
     
@@ -130,39 +233,167 @@ def generate_order_data(sql_conn, num_orders=500):
     
     order_statuses = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled']
     
-    for i in range(num_orders):
-        customer_id = random.choice(customer_ids)  # Use actual customer IDs
-        order_date = datetime.now() - timedelta(days=random.randint(0, 365))
+    if bulk_insert:
+        # Generate all data first
+        orders = []
+        for i in range(num_orders):
+            customer_id = random.choice(customer_ids)
+            order_date = datetime.now() - timedelta(days=random.randint(0, 365))
+            total_amount = round(random.uniform(20.0, 1000.0), 2)
+            order_status = random.choice(order_statuses)
+            orders.append((customer_id, order_date, total_amount, order_status))
         
-        # Generate random order amount
-        total_amount = round(random.uniform(20.0, 1000.0), 2)
-        
-        order_data = {
-            'customer_id': customer_id,
-            'order_date': order_date,
-            'total_amount': total_amount,
-            'order_status': random.choice(order_statuses)
-        }
-        
+        # Bulk insert
         try:
-            # Insert order into database
             query = """
             INSERT INTO ca.Orders (CustomerID, OrderDate, TotalAmount, OrderStatus)
             VALUES (?, ?, ?, ?)
             """
             with sql_conn.get_connection() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(query, (
-                        order_data['customer_id'],
-                        order_data['order_date'],
-                        order_data['total_amount'],
-                        order_data['order_status']
-                    ))
+                    cursor.executemany(query, orders)
                     conn.commit()
+            print(f"✓ Generated {num_orders} orders (bulk insert)")
         except Exception as e:
-            print(f"Error inserting order {i+1}: {e}")
+            print(f"Error bulk inserting orders: {e}")
+    else:
+        # Row by row insert
+        for i in range(num_orders):
+            customer_id = random.choice(customer_ids)  # Use actual customer IDs
+            order_date = datetime.now() - timedelta(days=random.randint(0, 365))
+            
+            # Generate random order amount
+            total_amount = round(random.uniform(20.0, 1000.0), 2)
+            
+            order_data = {
+                'customer_id': customer_id,
+                'order_date': order_date,
+                'total_amount': total_amount,
+                'order_status': random.choice(order_statuses)
+            }
+            
+            try:
+                # Insert order into database
+                query = """
+                INSERT INTO ca.Orders (CustomerID, OrderDate, TotalAmount, OrderStatus)
+                VALUES (?, ?, ?, ?)
+                """
+                with sql_conn.get_connection() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(query, (
+                            order_data['customer_id'],
+                            order_data['order_date'],
+                            order_data['total_amount'],
+                            order_data['order_status']
+                        ))
+                        conn.commit()
+            except Exception as e:
+                print(f"Error inserting order {i+1}: {e}")
+        
+        print(f"✓ Generated {num_orders} orders")
+
+
+def generate_order_items_data(sql_conn, num_items_per_order=None, bulk_insert=False):
+    """Generate sample order items data."""
+    print(f"Generating order items...")
     
-    print(f"✓ Generated {num_orders} orders")
+    # Get all orders
+    try:
+        with sql_conn.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT OrderID FROM ca.Orders")
+                order_ids = [row[0] for row in cursor.fetchall()]
+    except Exception as e:
+        print(f"Error fetching order IDs: {e}")
+        return
+    
+    if not order_ids:
+        print("No orders found in database. Please run generate_order_data first.")
+        return
+    
+    # Get all products
+    try:
+        with sql_conn.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT ProductID, UnitPrice FROM ca.Products")
+                products = cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching products: {e}")
+        return
+    
+    if not products:
+        print("No products found in database. Please run generate_sql_product_data first.")
+        return
+    
+    if bulk_insert:
+        # Generate all data first
+        order_items = []
+        for order_id in order_ids:
+            # Random number of items per order (1-5)
+            num_items = num_items_per_order if num_items_per_order else random.randint(1, 5)
+            
+            # Select random products for this order
+            selected_products = random.sample(products, min(num_items, len(products)))
+            
+            for product_id, unit_price in selected_products:
+                quantity = random.randint(1, 3)
+                discount = random.choice([0.0, 0.0, 0.0, 5.0, 10.0, 15.0])  # Mostly no discount
+                # Ensure proper types: int, int, int, float, float
+                order_items.append((
+                    int(order_id), 
+                    int(product_id), 
+                    quantity, 
+                    float(unit_price), 
+                    discount
+                ))
+        
+        # Bulk insert
+        try:
+            query = """
+            INSERT INTO ca.OrderItems (OrderID, ProductID, Quantity, UnitPrice, Discount)
+            VALUES (?, ?, ?, ?, ?)
+            """
+            with sql_conn.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.executemany(query, order_items)
+                    conn.commit()
+            print(f"✓ Generated {len(order_items)} order items (bulk insert)")
+        except Exception as e:
+            print(f"Error bulk inserting order items: {e}")
+    else:
+        # Row by row insert
+        total_items = 0
+        for order_id in order_ids:
+            # Random number of items per order (1-5)
+            num_items = num_items_per_order if num_items_per_order else random.randint(1, 5)
+            
+            # Select random products for this order
+            selected_products = random.sample(products, min(num_items, len(products)))
+            
+            for product_id, unit_price in selected_products:
+                quantity = random.randint(1, 3)
+                discount = random.choice([0.0, 0.0, 0.0, 5.0, 10.0, 15.0])  # Mostly no discount
+                
+                try:
+                    query = """
+                    INSERT INTO ca.OrderItems (OrderID, ProductID, Quantity, UnitPrice, Discount)
+                    VALUES (?, ?, ?, ?, ?)
+                    """
+                    with sql_conn.get_connection() as conn:
+                        with conn.cursor() as cursor:
+                            cursor.execute(query, (
+                                int(order_id),
+                                int(product_id),
+                                quantity,
+                                float(unit_price),
+                                discount
+                            ))
+                            conn.commit()
+                    total_items += 1
+                except Exception as e:
+                    print(f"Error inserting order item for order {order_id}: {e}")
+        
+        print(f"✓ Generated {total_items} order items")
 
 
 def generate_review_data(cosmos_conn, embedding_service, num_reviews=200):
@@ -315,6 +546,10 @@ def truncate_sql_table(sql_conn, table_name):
             sql_conn.execute_non_query("DELETE FROM ca.OrderItems")
             sql_conn.execute_non_query("DELETE FROM ca.Orders")
             sql_conn.execute_non_query("DELETE FROM ca.Customers")
+        elif table_name.lower() == 'ca.products':
+            # Truncate order items first (has FK to Products)
+            sql_conn.execute_non_query("DELETE FROM ca.OrderItems")
+            sql_conn.execute_non_query("DELETE FROM ca.Products")
         elif table_name.lower() == 'ca.orders':
             sql_conn.execute_non_query("DELETE FROM ca.OrderItems")
             sql_conn.execute_non_query("DELETE FROM ca.Orders")
@@ -426,21 +661,27 @@ def main():
     
     # Determine what to load
     load_sql_customers = False
+    load_sql_products = False
     load_sql_orders = False
+    load_sql_order_items = False
     load_cosmos_products = False
     load_cosmos_reviews = False
     load_cosmos_sessions = False
     
     if load_mode == 0:  # Load all
         load_sql_customers = True
+        load_sql_products = True
         load_sql_orders = True
+        load_sql_order_items = True
         load_cosmos_products = True
         load_cosmos_reviews = True
         load_cosmos_sessions = True
     elif load_mode == 1:  # SQL only
-        print("\n� SQL Tables:")
+        print("\n📊 SQL Tables:")
         load_sql_customers = get_yes_no("  Load Customers?")
+        load_sql_products = get_yes_no("  Load Products?")
         load_sql_orders = get_yes_no("  Load Orders?")
+        load_sql_order_items = get_yes_no("  Load Order Items?")
     elif load_mode == 2:  # CosmosDB only
         print("\n📊 CosmosDB Containers:")
         load_cosmos_products = get_yes_no("  Load Products?")
@@ -449,29 +690,36 @@ def main():
     elif load_mode == 3:  # Custom
         print("\n📊 SQL Tables:")
         load_sql_customers = get_yes_no("  Load Customers?")
+        load_sql_products = get_yes_no("  Load Products?")
         load_sql_orders = get_yes_no("  Load Orders?")
+        load_sql_order_items = get_yes_no("  Load Order Items?")
         print("\n📊 CosmosDB Containers:")
         load_cosmos_products = get_yes_no("  Load Products?")
         load_cosmos_reviews = get_yes_no("  Load Reviews?")
         load_cosmos_sessions = get_yes_no("  Load Sessions?")
     
     # =========================================================================
-    # LOAD MODE SELECTION
+    # TRUNCATE SELECTION
     # =========================================================================
-    print("\n⚙️ SELECT LOAD MODE")
+    print("\n🗑️ TRUNCATE TABLES/CONTAINERS?")
+    print("-" * 70)
+    truncate_first = get_yes_no("Clear existing data before loading?")
+    
+    # =========================================================================
+    # INSERT MODE SELECTION
+    # =========================================================================
+    print("\n⚙️ SELECT INSERT MODE")
     print("-" * 70)
     
-    load_modes = [
-        "Append - Add new records (row by row)",
-        "Truncate & Load - Clear tables first, then bulk insert (faster)",
-        "Truncate & Load - Clear tables first, then row by row insert"
+    insert_modes = [
+        "Row by row insert (slower, better error handling)",
+        "Bulk insert (faster, for large datasets)"
     ]
     
-    insert_mode = get_user_choice("How would you like to load data?", load_modes)
+    insert_mode = get_user_choice("How would you like to insert data?", insert_modes)
     if insert_mode is None:
         return
     
-    truncate_first = insert_mode in [1, 2]
     bulk_insert = insert_mode == 1
     
     # =========================================================================
@@ -480,30 +728,53 @@ def main():
     print("\n🔢 CONFIGURE RECORD COUNTS")
     print("-" * 70)
     
-    use_defaults = get_yes_no("Use default record counts? (Customers:100, Orders:200, Products:50, Reviews:100, Sessions:50)")
+    # Initialize all counts
+    num_customers = 100
+    num_sql_products = 20
+    num_orders = 200
+    num_cosmos_products = 50
+    num_reviews = 100
+    num_sessions = 50
     
-    if use_defaults:
-        num_customers = 100
-        num_orders = 200
-        num_products = 50
-        num_reviews = 100
-        num_sessions = 50
-    else:
-        try:
-            if load_sql_customers:
-                num_customers = int(input("  Number of Customers to generate: ").strip() or "100")
-            if load_sql_orders:
-                num_orders = int(input("  Number of Orders to generate: ").strip() or "200")
-            if load_cosmos_products:
-                num_products = int(input("  Number of Products to generate: ").strip() or "50")
-            if load_cosmos_reviews:
-                num_reviews = int(input("  Number of Reviews to generate: ").strip() or "100")
-            if load_cosmos_sessions:
-                num_sessions = int(input("  Number of Sessions to generate: ").strip() or "50")
-        except (ValueError, KeyboardInterrupt, EOFError):
-            print("\n❌ Invalid input. Using defaults.")
-            num_customers = num_orders = 100
-            num_products = num_reviews = num_sessions = 50
+    # Check if any SQL tables are selected
+    if load_sql_customers or load_sql_products or load_sql_orders or load_sql_order_items:
+        use_defaults = get_yes_no("Use default record counts for SQL tables? (Customers:100, Products:20, Orders:200)")
+        
+        if not use_defaults:
+            print("\n📊 Enter record counts for SQL tables:")
+            try:
+                if load_sql_customers:
+                    num_customers = int(input("  Number of Customers: ").strip() or "100")
+                if load_sql_products:
+                    num_sql_products = int(input("  Number of Products: ").strip() or "20")
+                if load_sql_orders:
+                    num_orders = int(input("  Number of Orders: ").strip() or "200")
+                if load_sql_order_items:
+                    print("  Order Items: auto-generated (1-5 items per order)")
+            except (ValueError, KeyboardInterrupt, EOFError):
+                print("\n❌ Invalid input. Using defaults for SQL tables.")
+                num_customers = 100
+                num_sql_products = 20
+                num_orders = 200
+    
+    # Check if any CosmosDB containers are selected
+    if load_cosmos_products or load_cosmos_reviews or load_cosmos_sessions:
+        use_defaults = get_yes_no("Use default record counts for CosmosDB containers? (Products:50, Reviews:100, Sessions:50)")
+        
+        if not use_defaults:
+            print("\n📊 Enter record counts for CosmosDB containers:")
+            try:
+                if load_cosmos_products:
+                    num_cosmos_products = int(input("  Number of Products: ").strip() or "50")
+                if load_cosmos_reviews:
+                    num_reviews = int(input("  Number of Reviews: ").strip() or "100")
+                if load_cosmos_sessions:
+                    num_sessions = int(input("  Number of Sessions: ").strip() or "50")
+            except (ValueError, KeyboardInterrupt, EOFError):
+                print("\n❌ Invalid input. Using defaults for CosmosDB containers.")
+                num_cosmos_products = 50
+                num_reviews = 100
+                num_sessions = 50
     
     # =========================================================================
     # CONFIRMATION
@@ -511,14 +782,19 @@ def main():
     print("\n" + "=" * 70)
     print("📋 CONFIGURATION SUMMARY")
     print("=" * 70)
-    print(f"\nLoad Mode: {load_modes[insert_mode]}")
+    print(f"\nTruncate First: {'Yes' if truncate_first else 'No'}")
+    print(f"Insert Mode: {'Bulk Insert' if bulk_insert else 'Row by Row'}")
     print("\nTables/Containers to load:")
     if load_sql_customers:
         print(f"  ✓ SQL Customers ({num_customers} records)")
+    if load_sql_products:
+        print(f"  ✓ SQL Products ({num_sql_products} records)")
     if load_sql_orders:
         print(f"  ✓ SQL Orders ({num_orders} records)")
+    if load_sql_order_items:
+        print(f"  ✓ SQL Order Items (auto-generated for orders)")
     if load_cosmos_products:
-        print(f"  ✓ CosmosDB Products ({num_products} records)")
+        print(f"  ✓ CosmosDB Products ({num_cosmos_products} records)")
     if load_cosmos_reviews:
         print(f"  ✓ CosmosDB Reviews ({num_reviews} records)")
     if load_cosmos_sessions:
@@ -540,7 +816,7 @@ def main():
     embedding_service = None
     
     try:
-        if load_sql_customers or load_sql_orders:
+        if load_sql_customers or load_sql_products or load_sql_orders or load_sql_order_items:
             driver = os.getenv("FABRIC_SQL_DRIVER", "ODBC Driver 18 for SQL Server")
             sql_conn = FabricSQLConnector(
                 endpoint=os.getenv("FABRIC_SQL_ENDPOINT"),
@@ -575,13 +851,17 @@ def main():
     # =========================================================================
     if truncate_first:
         print("\n" + "=" * 70)
-        print("�️  TRUNCATING TABLES/CONTAINERS")
+        print("🗑️  TRUNCATING TABLES/CONTAINERS")
         print("=" * 70)
         
         if load_sql_customers and sql_conn:
             truncate_sql_table(sql_conn, "ca.Customers")
+        if load_sql_products and sql_conn:
+            truncate_sql_table(sql_conn, "ca.Products")
         if load_sql_orders and sql_conn:
             truncate_sql_table(sql_conn, "ca.Orders")
+        if load_sql_order_items and sql_conn:
+            truncate_sql_table(sql_conn, "ca.OrderItems")
         if load_cosmos_products and cosmos_conn:
             truncate_cosmos_container(cosmos_conn, "Products")
         if load_cosmos_reviews and cosmos_conn:
@@ -598,23 +878,31 @@ def main():
     
     try:
         if load_sql_customers and sql_conn:
-            print(f"\n{'[1/5]' if load_mode == 0 else ''} Generating Customers...")
-            generate_customer_data(sql_conn, num_customers=num_customers)
+            print(f"\nGenerating Customers...")
+            generate_customer_data(sql_conn, num_customers=num_customers, bulk_insert=bulk_insert)
+        
+        if load_sql_products and sql_conn:
+            print(f"\nGenerating SQL Products...")
+            generate_sql_product_data(sql_conn, num_products=num_sql_products, bulk_insert=bulk_insert)
         
         if load_sql_orders and sql_conn:
-            print(f"\n{'[2/5]' if load_mode == 0 else ''} Generating Orders...")
-            generate_order_data(sql_conn, num_orders=num_orders)
+            print(f"\nGenerating Orders...")
+            generate_order_data(sql_conn, num_orders=num_orders, bulk_insert=bulk_insert)
+        
+        if load_sql_order_items and sql_conn:
+            print(f"\nGenerating Order Items...")
+            generate_order_items_data(sql_conn, bulk_insert=bulk_insert)
         
         if load_cosmos_products and cosmos_conn and embedding_service:
-            print(f"\n{'[3/5]' if load_mode == 0 else ''} Generating Products...")
-            generate_product_data(cosmos_conn, embedding_service, num_products=num_products)
+            print(f"\nGenerating CosmosDB Products...")
+            generate_product_data(cosmos_conn, embedding_service, num_products=num_cosmos_products)
         
         if load_cosmos_reviews and cosmos_conn and embedding_service:
-            print(f"\n{'[4/5]' if load_mode == 0 else ''} Generating Reviews...")
+            print(f"\nGenerating Reviews...")
             generate_review_data(cosmos_conn, embedding_service, num_reviews=num_reviews)
         
         if load_cosmos_sessions and cosmos_conn:
-            print(f"\n{'[5/5]' if load_mode == 0 else ''} Generating Sessions...")
+            print(f"\nGenerating Sessions...")
             generate_session_data(cosmos_conn, num_sessions=num_sessions)
         
     except Exception as e:
@@ -631,15 +919,19 @@ def main():
     print("=" * 70)
     print("\nGenerated:")
     if load_sql_customers:
-        print(f"  ✓ Customers: {num_customers} records")
+        print(f"  ✓ SQL Customers: {num_customers} records")
+    if load_sql_products:
+        print(f"  ✓ SQL Products: {num_sql_products} records")
     if load_sql_orders:
-        print(f"  ✓ Orders: {num_orders} records")
+        print(f"  ✓ SQL Orders: {num_orders} records")
+    if load_sql_order_items:
+        print(f"  ✓ SQL Order Items: auto-generated")
     if load_cosmos_products:
-        print(f"  ✓ Products: {num_products} records")
+        print(f"  ✓ CosmosDB Products: {num_cosmos_products} records")
     if load_cosmos_reviews:
-        print(f"  ✓ Reviews: {num_reviews} records")
+        print(f"  ✓ CosmosDB Reviews: {num_reviews} records")
     if load_cosmos_sessions:
-        print(f"  ✓ Sessions: {num_sessions} records")
+        print(f"  ✓ CosmosDB Sessions: {num_sessions} records")
     
     print("\n💡 Next Steps:")
     print("  • Run: python scripts/database_summary.py  (to verify data)")
