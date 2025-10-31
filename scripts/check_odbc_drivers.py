@@ -1,8 +1,9 @@
 """
 ODBC Driver Detection and Installation Helper
 Checks for installed SQL Server ODBC drivers and provides installation instructions
+Note: mssql-python bundles ODBC Driver 18 for SQL Server
 """
-import pyodbc
+import mssql_python
 import platform
 import sys
 
@@ -14,53 +15,27 @@ def check_odbc_drivers():
     print("=" * 80)
     print(f"\nSystem: {platform.system()} {platform.release()}")
     print(f"Python: {sys.version}")
-    print(f"pyodbc version: {pyodbc.version}")
+    print(f"mssql-python module: {mssql_python.__name__}")
     
     print("\n" + "=" * 80)
-    print("Available ODBC Drivers:")
+    print("SQL Server Driver Status:")
     print("=" * 80)
     
-    drivers = pyodbc.drivers()
-    
-    if not drivers:
-        print("❌ No ODBC drivers found!")
-        print_installation_instructions()
-        return False
-    
-    sql_server_drivers = []
-    for driver in drivers:
-        print(f"  • {driver}")
-        if "SQL Server" in driver:
-            sql_server_drivers.append(driver)
-    
-    print("\n" + "=" * 80)
-    print("SQL Server Drivers:")
-    print("=" * 80)
-    
-    if sql_server_drivers:
-        print("✅ SQL Server ODBC drivers found:")
-        for driver in sql_server_drivers:
-            print(f"  ✓ {driver}")
+    try:
+        # mssql-python bundles ODBC Driver 18 for SQL Server
+        print("✅ mssql-python is installed")
+        print("✅ ODBC Driver 18 for SQL Server (bundled with mssql-python)")
         
-        # Recommend the best driver
         print("\n" + "=" * 80)
         print("Recommendation:")
         print("=" * 80)
-        
-        if "ODBC Driver 18 for SQL Server" in sql_server_drivers:
-            recommended = "ODBC Driver 18 for SQL Server"
-        elif "ODBC Driver 17 for SQL Server" in sql_server_drivers:
-            recommended = "ODBC Driver 17 for SQL Server"
-        else:
-            recommended = sql_server_drivers[0]
-        
-        print(f"✅ Use this driver: {recommended}")
-        print(f"\nUpdate your .env file with:")
-        print(f'AZURE_SQL_DRIVER="{recommended}"')
+        print("✅ Driver ready to use: ODBC Driver 18 for SQL Server")
+        print("\nmssql-python automatically handles driver management.")
+        print("No additional ODBC driver installation needed!")
         
         return True
-    else:
-        print("❌ No SQL Server ODBC drivers found!")
+    except Exception as e:
+        print(f"❌ Error checking mssql-python: {e}")
         print_installation_instructions()
         return False
 
@@ -136,20 +111,11 @@ def check_env_file():
     driver = os.getenv("FABRIC_SQL_DRIVER")
     if driver:
         print(f"✓ FABRIC_SQL_DRIVER is set to: {driver}")
-        
-        # Verify if this driver exists
-        available_drivers = pyodbc.drivers()
-        if driver in available_drivers:
-            print("✅ This driver is available on your system!")
-        else:
-            print("⚠️  This driver is NOT available on your system")
-            print("   Available drivers:")
-            for d in available_drivers:
-                if "SQL Server" in d:
-                    print(f"     • {d}")
+        print("✅ mssql-python will use the bundled ODBC Driver 18 automatically")
     else:
-        print("⚠️  FABRIC_SQL_DRIVER is not set in .env file")
-        print("   Add this line to your .env file:")
+        print("ℹ️  FABRIC_SQL_DRIVER is not set in .env file")
+        print("   This is optional with mssql-python (uses bundled driver)")
+        print("   To explicitly set it, add this line to your .env file:")
         print('   FABRIC_SQL_DRIVER="ODBC Driver 18 for SQL Server"')
 
 

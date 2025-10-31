@@ -3,7 +3,7 @@ agent-framework[all]  # Pre-release version with all sub-packages
 openai>=1.0.0
 
 # Azure Database Connectors
-pyodbc==5.2.0
+mssql-python>=1.0.0  # Microsoft SQL Driver for Python
 azure-cosmos==4.7.0
 azure-identity==1.19.0
 

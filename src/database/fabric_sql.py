@@ -1,5 +1,5 @@
 """Microsoft Fabric SQL Database connector for customer and order data."""
-import pyodbc
+import mssql_python
 import pandas as pd
 from typing import Optional, List, Dict, Any
 import logging
@@ -17,7 +17,7 @@ class FabricSQLConnector:
         self,
         endpoint: str,
         database: str,
-        driver: str = "{ODBC Driver 18 for SQL Server}"
+        driver: str = "{ODBC Driver 18 for SQL Server}"  # Keep for compatibility, not used
     ):
         """
         Initialize Microsoft Fabric SQL connector with Entra ID authentication.
@@ -25,7 +25,7 @@ class FabricSQLConnector:
         Args:
             endpoint: Fabric SQL endpoint (e.g., 'workspace.datawarehouse.fabric.microsoft.com')
             database: Database name
-            driver: ODBC driver to use
+            driver: Kept for compatibility, mssql-python handles driver internally
             
         Note:
             Authentication uses Azure Entra ID (DefaultAzureCredential).
@@ -38,34 +38,18 @@ class FabricSQLConnector:
         """
         self.endpoint = endpoint
         self.database = database
-        self.driver = driver
         self.credential = DefaultAzureCredential()
-        
-        # Build base connection string without authentication
-        self.connection_string_base = (
-            f"DRIVER={driver};"
-            f"SERVER={endpoint};"
-            f"DATABASE={database};"
-            f"Encrypt=yes;"
-            f"TrustServerCertificate=no;"
-            f"Connection Timeout=30;"
-        )
     
-    def _get_access_token(self) -> bytes:
+    def _get_access_token(self) -> str:
         """
         Get access token for Azure SQL Database using Entra ID.
         
         Returns:
-            Access token in the format required by pyodbc
+            Access token string
         """
         # Scope for Azure SQL Database
         token = self.credential.get_token("https://database.windows.net/.default")
-        
-        # Convert token to format required by SQL Server ODBC driver
-        token_bytes = token.token.encode("utf-16-le")
-        token_struct = struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
-        
-        return token_struct
+        return token.token
         
     @contextmanager
     def get_connection(self):
@@ -73,20 +57,34 @@ class FabricSQLConnector:
         Context manager for database connections using Entra ID authentication.
         
         Yields:
-            pyodbc.Connection: Database connection
+            mssql_python.Connection: Database connection
         """
         conn = None
         try:
             # Get access token
-            token_struct = self._get_access_token()
+            token = self._get_access_token()
             
-            # SQL_COPT_SS_ACCESS_TOKEN constant
+            # Build connection string
+            connection_string = (
+                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+                f"SERVER={self.endpoint};"
+                f"DATABASE={self.database};"
+                f"Encrypt=yes;"
+                f"TrustServerCertificate=no;"
+            )
+            
+            # SQL_COPT_SS_ACCESS_TOKEN constant for access token authentication
             SQL_COPT_SS_ACCESS_TOKEN = 1256
             
-            # Connect with access token
-            conn = pyodbc.connect(
-                self.connection_string_base,
-                attrs_before={SQL_COPT_SS_ACCESS_TOKEN: token_struct}
+            # Encode token for SQL Server (same format as pyodbc)
+            token_bytes = token.encode("utf-16-le")
+            token_struct = struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
+            
+            # Connect with access token using mssql-python
+            conn = mssql_python.connect(
+                connection_string,
+                attrs_before={SQL_COPT_SS_ACCESS_TOKEN: token_struct},
+                timeout=30
             )
             yield conn
         except Exception as e:
