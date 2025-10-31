@@ -2,7 +2,7 @@
 Comprehensive Setup Script for IntelliCA Microsoft Fabric Environment
 ===================================================================
 This script initializes all required data for a new environment:
-1. Fabric SQL Database: Customers, Products, Orders, OrderDetails
+1. Fabric SQL Database: Customers, Products, Orders, OrderItems
 2. Fabric CosmosDB NoSQL: Products with embeddings, Reviews with embeddings, Sessions
 
 Run this script once when setting up a new environment.
@@ -175,7 +175,7 @@ def setup_sql_orders(sql_conn, num_orders=200):
                     total_amount += line_total
                     
                     detail_query = """
-                        INSERT INTO ca.OrderDetails (OrderID, ProductID, Quantity, UnitPrice, LineTotal)
+                        INSERT INTO ca.OrderItems (OrderID, ProductID, Quantity, UnitPrice, LineTotal)
                         VALUES (?, ?, ?, ?, ?)
                     """
                     sql_conn.execute_non_query(detail_query, (order_id, product_id, quantity, unit_price, line_total))

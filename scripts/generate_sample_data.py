@@ -14,7 +14,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from dotenv import load_dotenv
 load_dotenv()
 
-from src.database import AzureSQLConnector, CosmosDBConnector
+from src.database.fabric_sql import FabricSQLConnector
+from src.database.fabric_cosmos import FabricCosmosDBConnector
 from src.agent_integration import get_embedding_service, generate_embeddings
 
 fake = Faker()
@@ -304,42 +305,264 @@ def generate_session_data(cosmos_conn, num_sessions=50):
     print(f"✓ Generated {num_sessions} sessions")
 
 
+def truncate_sql_table(sql_conn, table_name):
+    """Truncate a SQL table."""
+    try:
+        # Check if table has foreign key constraints
+        if table_name.lower() == 'ca.customers':
+            # Truncate related tables first
+            print(f"  Truncating related tables first...")
+            sql_conn.execute_non_query("DELETE FROM ca.OrderItems")
+            sql_conn.execute_non_query("DELETE FROM ca.Orders")
+            sql_conn.execute_non_query("DELETE FROM ca.Customers")
+        elif table_name.lower() == 'ca.orders':
+            sql_conn.execute_non_query("DELETE FROM ca.OrderItems")
+            sql_conn.execute_non_query("DELETE FROM ca.Orders")
+        elif table_name.lower() == 'ca.orderitems':
+            sql_conn.execute_non_query("DELETE FROM ca.OrderItems")
+        else:
+            sql_conn.execute_non_query(f"TRUNCATE TABLE {table_name}")
+        print(f"  ✓ Truncated {table_name}")
+        return True
+    except Exception as e:
+        print(f"  ❌ Error truncating {table_name}: {e}")
+        return False
+
+
+def truncate_cosmos_container(cosmos_conn, container_name):
+    """Delete all items from a CosmosDB container."""
+    try:
+        container = None
+        if container_name.lower() == 'products':
+            container = cosmos_conn.products_container
+        elif container_name.lower() == 'reviews':
+            container = cosmos_conn.reviews_container
+        elif container_name.lower() == 'sessions':
+            container = cosmos_conn.container
+        
+        if not container:
+            print(f"  ❌ Unknown container: {container_name}")
+            return False
+        
+        # Query all items
+        items = list(container.query_items(
+            query="SELECT c.id, c._partitionKey FROM c",
+            enable_cross_partition_query=True
+        ))
+        
+        print(f"  Deleting {len(items)} items from {container_name}...")
+        for item in items:
+            try:
+                container.delete_item(item=item['id'], partition_key=item.get('_partitionKey'))
+            except:
+                pass  # Item might already be deleted
+        
+        print(f"  ✓ Cleared {container_name} container")
+        return True
+    except Exception as e:
+        print(f"  ❌ Error clearing {container_name}: {e}")
+        return False
+
+
+def get_user_choice(prompt, options):
+    """Get user choice from a list of options."""
+    while True:
+        print(f"\n{prompt}")
+        for i, option in enumerate(options, 1):
+            print(f"  {i}. {option}")
+        try:
+            choice = input("\nEnter your choice (number): ").strip()
+            choice_num = int(choice)
+            if 1 <= choice_num <= len(options):
+                return choice_num - 1
+            else:
+                print(f"❌ Please enter a number between 1 and {len(options)}")
+        except (ValueError, KeyboardInterrupt):
+            print("\n❌ Invalid input. Please enter a number.")
+        except EOFError:
+            print("\n❌ No input received.")
+            return None
+
+
+def get_yes_no(prompt):
+    """Get yes/no response from user."""
+    while True:
+        try:
+            response = input(f"\n{prompt} (y/n): ").strip().lower()
+            if response in ['y', 'yes']:
+                return True
+            elif response in ['n', 'no']:
+                return False
+            else:
+                print("❌ Please enter 'y' or 'n'")
+        except (KeyboardInterrupt, EOFError):
+            print("\n❌ Operation cancelled.")
+            return False
+
+
 def main():
-    """Main function to generate all sample data."""
-    print("=" * 60)
+    """Main function to generate sample data with interactive options."""
+    print("=" * 70)
     print("Sample Data Generator for Customer Analytics Platform")
     print("Microsoft Fabric SQL Database + Fabric CosmosDB NoSQL")
-    print("=" * 60)
+    print("=" * 70)
     
-    # Initialize connectors
-    print("\n📡 Initializing database connections...")
+    # =========================================================================
+    # INTERACTIVE MODE SELECTION
+    # =========================================================================
+    print("\n📋 SELECT TABLES/CONTAINERS TO LOAD")
+    print("-" * 70)
+    
+    tables_options = [
+        "Load ALL tables and containers",
+        "Select specific SQL tables only",
+        "Select specific CosmosDB containers only",
+        "Custom selection (both SQL and CosmosDB)"
+    ]
+    
+    load_mode = get_user_choice("What would you like to load?", tables_options)
+    if load_mode is None:
+        return
+    
+    # Determine what to load
+    load_sql_customers = False
+    load_sql_orders = False
+    load_cosmos_products = False
+    load_cosmos_reviews = False
+    load_cosmos_sessions = False
+    
+    if load_mode == 0:  # Load all
+        load_sql_customers = True
+        load_sql_orders = True
+        load_cosmos_products = True
+        load_cosmos_reviews = True
+        load_cosmos_sessions = True
+    elif load_mode == 1:  # SQL only
+        print("\n� SQL Tables:")
+        load_sql_customers = get_yes_no("  Load Customers?")
+        load_sql_orders = get_yes_no("  Load Orders?")
+    elif load_mode == 2:  # CosmosDB only
+        print("\n📊 CosmosDB Containers:")
+        load_cosmos_products = get_yes_no("  Load Products?")
+        load_cosmos_reviews = get_yes_no("  Load Reviews?")
+        load_cosmos_sessions = get_yes_no("  Load Sessions?")
+    elif load_mode == 3:  # Custom
+        print("\n📊 SQL Tables:")
+        load_sql_customers = get_yes_no("  Load Customers?")
+        load_sql_orders = get_yes_no("  Load Orders?")
+        print("\n📊 CosmosDB Containers:")
+        load_cosmos_products = get_yes_no("  Load Products?")
+        load_cosmos_reviews = get_yes_no("  Load Reviews?")
+        load_cosmos_sessions = get_yes_no("  Load Sessions?")
+    
+    # =========================================================================
+    # LOAD MODE SELECTION
+    # =========================================================================
+    print("\n⚙️ SELECT LOAD MODE")
+    print("-" * 70)
+    
+    load_modes = [
+        "Append - Add new records (row by row)",
+        "Truncate & Load - Clear tables first, then bulk insert (faster)",
+        "Truncate & Load - Clear tables first, then row by row insert"
+    ]
+    
+    insert_mode = get_user_choice("How would you like to load data?", load_modes)
+    if insert_mode is None:
+        return
+    
+    truncate_first = insert_mode in [1, 2]
+    bulk_insert = insert_mode == 1
+    
+    # =========================================================================
+    # RECORD COUNT CONFIGURATION
+    # =========================================================================
+    print("\n🔢 CONFIGURE RECORD COUNTS")
+    print("-" * 70)
+    
+    use_defaults = get_yes_no("Use default record counts? (Customers:100, Orders:200, Products:50, Reviews:100, Sessions:50)")
+    
+    if use_defaults:
+        num_customers = 100
+        num_orders = 200
+        num_products = 50
+        num_reviews = 100
+        num_sessions = 50
+    else:
+        try:
+            if load_sql_customers:
+                num_customers = int(input("  Number of Customers to generate: ").strip() or "100")
+            if load_sql_orders:
+                num_orders = int(input("  Number of Orders to generate: ").strip() or "200")
+            if load_cosmos_products:
+                num_products = int(input("  Number of Products to generate: ").strip() or "50")
+            if load_cosmos_reviews:
+                num_reviews = int(input("  Number of Reviews to generate: ").strip() or "100")
+            if load_cosmos_sessions:
+                num_sessions = int(input("  Number of Sessions to generate: ").strip() or "50")
+        except (ValueError, KeyboardInterrupt, EOFError):
+            print("\n❌ Invalid input. Using defaults.")
+            num_customers = num_orders = 100
+            num_products = num_reviews = num_sessions = 50
+    
+    # =========================================================================
+    # CONFIRMATION
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("📋 CONFIGURATION SUMMARY")
+    print("=" * 70)
+    print(f"\nLoad Mode: {load_modes[insert_mode]}")
+    print("\nTables/Containers to load:")
+    if load_sql_customers:
+        print(f"  ✓ SQL Customers ({num_customers} records)")
+    if load_sql_orders:
+        print(f"  ✓ SQL Orders ({num_orders} records)")
+    if load_cosmos_products:
+        print(f"  ✓ CosmosDB Products ({num_products} records)")
+    if load_cosmos_reviews:
+        print(f"  ✓ CosmosDB Reviews ({num_reviews} records)")
+    if load_cosmos_sessions:
+        print(f"  ✓ CosmosDB Sessions ({num_sessions} records)")
+    
+    if not get_yes_no("\nProceed with data generation?"):
+        print("\n❌ Operation cancelled.")
+        return
+    
+    # =========================================================================
+    # INITIALIZE CONNECTIONS
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("📡 INITIALIZING DATABASE CONNECTIONS")
+    print("=" * 70)
+    
+    sql_conn = None
+    cosmos_conn = None
+    embedding_service = None
     
     try:
-        # Fabric SQL Database (Entra ID authentication)
-        driver = os.getenv("FABRIC_SQL_DRIVER", "ODBC Driver 18 for SQL Server")
-        print(f"Using ODBC driver: {driver}")
-
-        sql_conn = AzureSQLConnector(
-            endpoint=os.getenv("FABRIC_SQL_ENDPOINT"),
-            database=os.getenv("FABRIC_SQL_DATABASE"),
-            driver=f"{{{driver}}}"
-        )
-        print("✓ Fabric SQL Database connected")
+        if load_sql_customers or load_sql_orders:
+            driver = os.getenv("FABRIC_SQL_DRIVER", "ODBC Driver 18 for SQL Server")
+            sql_conn = FabricSQLConnector(
+                endpoint=os.getenv("FABRIC_SQL_ENDPOINT"),
+                database=os.getenv("FABRIC_SQL_DATABASE"),
+                driver=f"{{{driver}}}"
+            )
+            print("✓ Fabric SQL Database connected")
         
-        # Fabric CosmosDB NoSQL (Entra ID authentication)
-        cosmos_conn = CosmosDBConnector(
-            endpoint=os.getenv("FABRIC_COSMOSDB_ENDPOINT"),
-            database_name=os.getenv("FABRIC_COSMOSDB_DATABASE", "IntelliCAPDB"),
-            container_name=os.getenv("FABRIC_COSMOSDB_SESSIONS_CONTAINER", "Sessions"),
-            products_container_name=os.getenv("FABRIC_COSMOSDB_PRODUCTS_CONTAINER", "Products"),
-            reviews_container_name=os.getenv("FABRIC_COSMOSDB_REVIEWS_CONTAINER", "Reviews")
-        )
-        cosmos_conn.initialize()
-        print("✓ Fabric CosmosDB NoSQL connected")
+        if load_cosmos_products or load_cosmos_reviews or load_cosmos_sessions:
+            cosmos_conn = FabricCosmosDBConnector(
+                endpoint=os.getenv("FABRIC_COSMOSDB_ENDPOINT"),
+                database_name=os.getenv("FABRIC_COSMOSDB_DATABASE", "IntelliCAPDB"),
+                container_name=os.getenv("FABRIC_COSMOSDB_SESSIONS_CONTAINER", "Sessions"),
+                products_container_name=os.getenv("FABRIC_COSMOSDB_PRODUCTS_CONTAINER", "Products"),
+                reviews_container_name=os.getenv("FABRIC_COSMOSDB_REVIEWS_CONTAINER", "Reviews")
+            )
+            cosmos_conn.initialize()
+            print("✓ Fabric CosmosDB NoSQL connected")
         
-        # Initialize embedding service
-        embedding_service = get_embedding_service(use_azure=True)
-        print("✓ Embedding service initialized")
+        if load_cosmos_products or load_cosmos_reviews:
+            embedding_service = get_embedding_service(use_azure=True)
+            print("✓ Embedding service initialized")
         
     except Exception as e:
         print(f"❌ Error initializing connections: {e}")
@@ -347,30 +570,81 @@ def main():
         traceback.print_exc()
         return
     
-    print("\n📊 Generating sample data...")
-    print("-" * 60)
+    # =========================================================================
+    # TRUNCATE TABLES IF REQUESTED
+    # =========================================================================
+    if truncate_first:
+        print("\n" + "=" * 70)
+        print("�️  TRUNCATING TABLES/CONTAINERS")
+        print("=" * 70)
+        
+        if load_sql_customers and sql_conn:
+            truncate_sql_table(sql_conn, "ca.Customers")
+        if load_sql_orders and sql_conn:
+            truncate_sql_table(sql_conn, "ca.Orders")
+        if load_cosmos_products and cosmos_conn:
+            truncate_cosmos_container(cosmos_conn, "Products")
+        if load_cosmos_reviews and cosmos_conn:
+            truncate_cosmos_container(cosmos_conn, "Reviews")
+        if load_cosmos_sessions and cosmos_conn:
+            truncate_cosmos_container(cosmos_conn, "Sessions")
     
-    # Generate data
+    # =========================================================================
+    # GENERATE DATA
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("📊 GENERATING SAMPLE DATA")
+    print("=" * 70)
+    
     try:
-        generate_customer_data(sql_conn, num_customers=20)  # Reduced for faster testing
-        generate_order_data(sql_conn, num_orders=50)  # Reduced for faster testing
-        generate_product_data(cosmos_conn, embedding_service, num_products=10)  # Reduced for faster testing
-        generate_review_data(cosmos_conn, embedding_service, num_reviews=20)  # Reduced for faster testing
-        generate_session_data(cosmos_conn, num_sessions=10)  # Reduced for faster testing
+        if load_sql_customers and sql_conn:
+            print(f"\n{'[1/5]' if load_mode == 0 else ''} Generating Customers...")
+            generate_customer_data(sql_conn, num_customers=num_customers)
+        
+        if load_sql_orders and sql_conn:
+            print(f"\n{'[2/5]' if load_mode == 0 else ''} Generating Orders...")
+            generate_order_data(sql_conn, num_orders=num_orders)
+        
+        if load_cosmos_products and cosmos_conn and embedding_service:
+            print(f"\n{'[3/5]' if load_mode == 0 else ''} Generating Products...")
+            generate_product_data(cosmos_conn, embedding_service, num_products=num_products)
+        
+        if load_cosmos_reviews and cosmos_conn and embedding_service:
+            print(f"\n{'[4/5]' if load_mode == 0 else ''} Generating Reviews...")
+            generate_review_data(cosmos_conn, embedding_service, num_reviews=num_reviews)
+        
+        if load_cosmos_sessions and cosmos_conn:
+            print(f"\n{'[5/5]' if load_mode == 0 else ''} Generating Sessions...")
+            generate_session_data(cosmos_conn, num_sessions=num_sessions)
+        
     except Exception as e:
-        print(f"❌ Error generating data: {e}")
+        print(f"\n❌ Error generating data: {e}")
         import traceback
         traceback.print_exc()
         return
     
-    print("\n" + "=" * 60)
-    print("✅ Sample data generation completed successfully!")
-    print("=" * 60)
-    print("\nSummary:")
-    print("  - Fabric SQL Database: 20 customers, 50 orders")
-    print("  - Fabric CosmosDB NoSQL: 10 products, 20 reviews, 10 sessions")
-    print("\nYou can now run the Streamlit application:")
-    print("  $env:OTEL_SDK_DISABLED=\"true\"; streamlit run Home.py")
+    # =========================================================================
+    # SUMMARY
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("✅ SAMPLE DATA GENERATION COMPLETED!")
+    print("=" * 70)
+    print("\nGenerated:")
+    if load_sql_customers:
+        print(f"  ✓ Customers: {num_customers} records")
+    if load_sql_orders:
+        print(f"  ✓ Orders: {num_orders} records")
+    if load_cosmos_products:
+        print(f"  ✓ Products: {num_products} records")
+    if load_cosmos_reviews:
+        print(f"  ✓ Reviews: {num_reviews} records")
+    if load_cosmos_sessions:
+        print(f"  ✓ Sessions: {num_sessions} records")
+    
+    print("\n💡 Next Steps:")
+    print("  • Run: python scripts/database_summary.py  (to verify data)")
+    print("  • Run: streamlit run Home.py  (to launch the application)")
+    print("=" * 70)
 
 
 if __name__ == "__main__":

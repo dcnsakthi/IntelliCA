@@ -133,9 +133,9 @@ def check_env_file():
     import dotenv
     dotenv.load_dotenv()
     
-    driver = os.getenv("AZURE_SQL_DRIVER")
+    driver = os.getenv("FABRIC_SQL_DRIVER")
     if driver:
-        print(f"✓ AZURE_SQL_DRIVER is set to: {driver}")
+        print(f"✓ FABRIC_SQL_DRIVER is set to: {driver}")
         
         # Verify if this driver exists
         available_drivers = pyodbc.drivers()
@@ -148,9 +148,9 @@ def check_env_file():
                 if "SQL Server" in d:
                     print(f"     • {d}")
     else:
-        print("⚠️  AZURE_SQL_DRIVER is not set in .env file")
+        print("⚠️  FABRIC_SQL_DRIVER is not set in .env file")
         print("   Add this line to your .env file:")
-        print('   AZURE_SQL_DRIVER="ODBC Driver 18 for SQL Server"')
+        print('   FABRIC_SQL_DRIVER="ODBC Driver 18 for SQL Server"')
 
 
 if __name__ == "__main__":

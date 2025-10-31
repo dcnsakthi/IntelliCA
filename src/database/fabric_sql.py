@@ -109,7 +109,21 @@ class FabricSQLConnector:
         """
         try:
             with self.get_connection() as conn:
-                df = pd.read_sql(query, conn, params=params)
+                cursor = conn.cursor()
+                if params:
+                    cursor.execute(query, params)
+                else:
+                    cursor.execute(query)
+                
+                # Fetch column names
+                columns = [column[0] for column in cursor.description]
+                
+                # Fetch all rows
+                rows = cursor.fetchall()
+                
+                # Convert to DataFrame
+                df = pd.DataFrame.from_records(rows, columns=columns)
+                
             logger.info(f"Query executed successfully, returned {len(df)} rows")
             return df
         except Exception as e:

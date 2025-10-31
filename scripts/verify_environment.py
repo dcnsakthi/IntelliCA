@@ -2,7 +2,7 @@
 Verify IntelliCA Microsoft Fabric Environment
 ==============================================
 This script checks the status of all data in your Fabric environment:
-- Fabric SQL Database: Customers, Products, Orders, OrderDetails
+- Fabric SQL Database: Customers, Products, Orders, OrderItems
 - Fabric CosmosDB NoSQL: Products, Reviews, Sessions
 
 Run this script to verify your environment is properly set up.
@@ -29,7 +29,7 @@ def check_sql_data(sql_conn):
         ("ca.Customers", "CustomerID", "FirstName, LastName, Email"),
         ("ca.Products", "ProductID", "ProductName, Category, UnitPrice"),
         ("ca.Orders", "OrderID", "OrderDate, TotalAmount, OrderStatus"),
-        ("ca.OrderDetails", "OrderDetailID", "OrderID, ProductID, Quantity")
+        ("ca.OrderItems", "OrderItemID", "OrderID, ProductID, Quantity")
     ]
     
     total_records = 0
